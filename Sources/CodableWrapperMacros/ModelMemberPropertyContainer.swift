@@ -1,11 +1,20 @@
+
 import SwiftSyntax
 import SwiftSyntaxMacros
 
 private struct ModelMemberProperty {
+    struct IgnoreOption: OptionSet {
+        let rawValue: UInt
+
+        static let decode = IgnoreOption(rawValue: 1 << 0)
+        static let encode = IgnoreOption(rawValue: 1 << 1)
+    }
+
     var name: String
     var type: String
     var modifiers: DeclModifierListSyntax = []
     var isOptional: Bool = false
+    var ignoreOption: IgnoreOption?
     var normalKeys: [String] = []
     var nestedKeys: [String] = []
     var transformerExpr: String?
@@ -68,7 +77,11 @@ struct ModelMemberPropertyContainer {
     }
 
     func genDecoderInitializer(config: GenConfig) throws -> DeclSyntax {
-        let body = memberProperties.enumerated().map { idx, member in
+        let body = memberProperties.enumerated().compactMap { idx, member in
+            if let ignoreType = member.ignoreOption, ignoreType.contains(.decode) {
+                return nil
+            }
+
             if let transformerExpr = member.transformerExpr {
                 let transformerVar = context.makeUniqueName(String(idx))
                 let tempJsonVar = member.name
@@ -90,21 +103,24 @@ struct ModelMemberPropertyContainer {
 
                 return text
             } else {
-                let body = "container.decode(type: Swift.type(of: self.\(member.name)), keys: [\(member.codingKeys.joined(separator: ", "))], nestedKeys: [\(member.nestedKeys.joined(separator: ", "))])"
+                let body = "container.decode(type: Swift.type(of: \(member.name)), keys: [\(member.codingKeys.joined(separator: ", "))], nestedKeys: [\(member.nestedKeys.joined(separator: ", "))])"
 
                 if let initializerExpr = member.initializerExpr {
-                    return "self.\(member.name) = (try? \(body)) ?? (\(initializerExpr))"
+                    return "\(member.name) = (try? \(body)) ?? (\(initializerExpr))"
                 } else {
-                    return "self.\(member.name) = try \(body)"
+                    return "\(member.name) = try \(body)"
                 }
             }
         }
         .joined(separator: "\n")
 
+        let decodeFinishFunction = config.isOverride ? "" : """
+            decodeDidFinish()
+        """
         let decoder: DeclSyntax = """
         \(raw: attributesPrefix(option: [.public, .required]))init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: AnyCodingKey.self)
-            \(raw: body)\(raw: config.isOverride ? "\ntry super.init(from: decoder)" : "")
+            \(raw: body)\(raw: config.isOverride ? "\ntry super.init(from: decoder)" : "")\(raw: decodeFinishFunction)
         }
         """
 
@@ -112,7 +128,11 @@ struct ModelMemberPropertyContainer {
     }
 
     func genEncodeFunction(config: GenConfig) throws -> DeclSyntax {
-        let body = memberProperties.enumerated().map { idx, member in
+        let body = memberProperties.enumerated().compactMap { idx, member in
+            if let ignoreType = member.ignoreOption, ignoreType.contains(.encode) {
+                return nil
+            }
+
             if let transformerExpr = member.transformerExpr {
                 let transformerVar = context.makeUniqueName(String(idx))
 
@@ -133,7 +153,7 @@ struct ModelMemberPropertyContainer {
                 }
 
             } else {
-                return "try container.encode(value: self.\(member.name), keys: [\(member.codingKeys.joined(separator: ", "))], nestedKeys: [\(member.nestedKeys.joined(separator: ", "))])"
+                return "try container.encode(value: \(member.name), keys: [\(member.codingKeys.joined(separator: ", "))], nestedKeys: [\(member.nestedKeys.joined(separator: ", "))])"
             }
         }
         .joined(separator: "\n")
@@ -149,7 +169,14 @@ struct ModelMemberPropertyContainer {
     }
 
     func genMemberwiseInit(config: GenConfig) throws -> DeclSyntax {
-        let parameters = memberProperties.map { property in
+        var parameters = [String]()
+        var setDatas = [String]()
+
+        for property in memberProperties {
+            if property.ignoreOption != nil {
+                continue
+            }
+
             var text = property.name
             text += ": " + property.type
             if let initializerExpr = property.initializerExpr {
@@ -157,7 +184,9 @@ struct ModelMemberPropertyContainer {
             } else if property.isOptional {
                 text += "= nil"
             }
-            return text
+            parameters.append(text)
+
+            setDatas.append("self.\(property.name) = \(property.name)")
         }
 
         let overrideInit = config.isOverride ? "super.init()\n" : ""
@@ -165,7 +194,7 @@ struct ModelMemberPropertyContainer {
         return
             """
             \(raw: attributesPrefix(option: [.public]))init(\(raw: parameters.joined(separator: ", "))) {
-                \(raw: overrideInit)\(raw: memberProperties.map { "self.\($0.name) = \($0.name)" }.joined(separator: "\n"))
+                \(raw: overrideInit)\(raw: setDatas.joined(separator: "\n"))
             }
             """ as DeclSyntax
     }
@@ -178,39 +207,45 @@ private extension ModelMemberPropertyContainer {
             guard let variable = member.decl.as(VariableDeclSyntax.self), variable.isStoredProperty else {
                 return []
             }
+
             let patterns = variable.bindings.map(\.pattern)
-            let names = patterns.compactMap { $0.as(IdentifierPatternSyntax.self)?.identifier.text }
-            return try names.map { name -> ModelMemberProperty in
+            return try patterns.compactMap {
+                guard let name = $0.as(IdentifierPatternSyntax.self)?.identifier.text else {
+                    return nil
+                }
+
                 guard let type = variable.inferType else {
                     throw ASTError("please declare property type: \(name)")
                 }
 
                 var mp = ModelMemberProperty(name: name, type: type)
                 mp.modifiers = variable.modifiers
-                let attributes = variable.attributes
-
                 // isOptional
                 mp.isOptional = variable.isOptionalType
 
-                // CodingKey
-                if let customKeyMacro = attributes.first(where: { element in
-                    element.as(AttributeSyntax.self)?.attributeName.as(IdentifierTypeSyntax.self)?.description == "CodingKey"
-                }) {
-                    mp.normalKeys = customKeyMacro.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.compactMap { $0.expression.description } ?? []
-                }
+                let attributes = variable.attributes
 
-                // CodingNestedKey
-                if let customKeyMacro = attributes.first(where: { element in
-                    element.as(AttributeSyntax.self)?.attributeName.as(IdentifierTypeSyntax.self)?.description == "CodingNestedKey"
-                }) {
-                    mp.nestedKeys = customKeyMacro.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.compactMap { $0.expression.description } ?? []
-                }
+                for attribute in attributes {
+                    let customKeyMacro = attribute.as(AttributeSyntax.self)?.attributeName.as(IdentifierTypeSyntax.self)?.description
 
-                // CodableTransform
-                if let customKeyMacro = attributes.first(where: { element in
-                    element.as(AttributeSyntax.self)?.attributeName.as(IdentifierTypeSyntax.self)?.description == "CodingTransformer"
-                }) {
-                    mp.transformerExpr = customKeyMacro.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.description
+                    switch customKeyMacro {
+                    case "CodingIgnoreKey":  mp.ignoreOption = [.decode, .encode]; continue
+                    case "DecodingIgnoreKey": mp.ignoreOption = .decode; continue
+                    case "EncodingIgnoreKey": mp.ignoreOption = .encode; continue
+                    default: break
+                    }
+
+                    if customKeyMacro == "CodingKey" {
+                        mp.normalKeys = attribute.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.compactMap { $0.expression.description } ?? []
+                    }
+
+                    if customKeyMacro == "CodingNestedKey" {
+                        mp.nestedKeys = attribute.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.compactMap { $0.expression.description } ?? []
+                    }
+
+                    if customKeyMacro == "CodingTransformer" {
+                        mp.transformerExpr = attribute.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.description
+                    }
                 }
 
                 // initializerExpr

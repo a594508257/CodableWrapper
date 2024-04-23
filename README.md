@@ -94,7 +94,7 @@ final class CodableWrapperTests: XCTestCase {
 
 ## @Codable
 
-* Auto conformance `Codable` protocol if not explicitly declared
+* Auto conformance `Codable` and `CodableObversable` protocol if not explicitly declared
   
   ```swift
   // both below works well
@@ -104,6 +104,17 @@ final class CodableWrapperTests: XCTestCase {
   
   @Codable
   struct BasicModel: Codable {}
+  
+  @Codable
+  struct BasicModel: Codable, CodableObversable {}
+  
+  @Codable
+  struct BasicModel {
+      var age: Int = 0
+      mutating func didDecodeFinish() {
+          age = 1
+      }
+  }
   ```
 
 * Default value
@@ -180,6 +191,21 @@ final class CodableWrapperTests: XCTestCase {
   }
   
   // { "data": {"u9": "jhon"} }
+  ```
+
+## @CodingIgnoreKey
+
+* Custom `Coding` ignore in Model
+  
+  ```swift
+  @Codable
+  struct TestModel {
+      @CodingIgnoreKey
+      var userName: String = ""
+  }
+  
+  // { "userName": "jhon" }
+  // result: userName is nil
   ```
 
 ## @CodableSubclass

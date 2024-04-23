@@ -1,7 +1,14 @@
+//
+//  Codable.swift
+//  KZCodable
+//
+//  Created by Monochrome on 2024/3/29.
+//
+
 import SwiftSyntax
 import SwiftSyntaxMacros
 
-public struct Codable: ExtensionMacro, MemberMacro {
+public struct EncodableMacro: ExtensionMacro, MemberMacro {
     public static func expansion(of node: AttributeSyntax,
                                  attachedTo declaration: some DeclGroupSyntax,
                                  providingExtensionsOf type: some TypeSyntaxProtocol,
@@ -16,8 +23,8 @@ public struct Codable: ExtensionMacro, MemberMacro {
             throw ASTError("use @Codable in `struct` or `class`")
         }
 
-        let codableKey = "Codable"
-        let codableObservableKey = "CodableObservable"
+        let codableKey = "Encodable"
+        let codableObservableKey = "EncodableObservable"
         var extesions = [codableKey, codableObservableKey]
         if let inheritedTypes = inheritedTypes {
             if inheritedTypes.contains(where: { $0.type.trimmedDescription == codableKey }) {
@@ -50,9 +57,7 @@ public struct Codable: ExtensionMacro, MemberMacro {
         // TODO: diagnostic do not implement `init(from:)` or `encode(to:))`
 
         let propertyContainer = try ModelMemberPropertyContainer(decl: declaration, context: context)
-        let decoder = try propertyContainer.genDecoderInitializer(config: .init(isOverride: false))
         let encoder = try propertyContainer.genEncodeFunction(config: .init(isOverride: false))
-        let memberwiseInit = try propertyContainer.genMemberwiseInit(config: .init(isOverride: false))
-        return [decoder, encoder, memberwiseInit]
+        return [encoder]
     }
 }

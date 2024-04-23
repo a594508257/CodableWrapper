@@ -7,6 +7,7 @@
 
 import CodableWrapper
 import Foundation
+import XCTest
 
 @Codable
 class ClassModel0: Codable {
@@ -65,14 +66,3 @@ public extension ClassModel11 {
     }
 }
 
-// @CodableSubclass
-// struct StructWraning0 {}
-//
-// @CodingKey("a")
-// struct StructWraning1 {}
-//
-// @CodingNestedKey("a")
-// struct StructWraning2 {}
-//
-// @CodingTransformer(StringPrefixTransform("HELLO -> "))
-// struct StructWraning3 {}

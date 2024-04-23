@@ -16,7 +16,7 @@ class StringPrefixTransform: TransformType {
     }
 
     func transformToJSON(_ object: String) -> String? {
-        object.replacing(prefix, with: "")
+        object.replacingOccurrences(of: prefix, with: "")
     }
 }
 
