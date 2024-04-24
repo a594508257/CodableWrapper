@@ -14,9 +14,9 @@ protocol _BuiltInBridgeType {
 
 // Suppport integer type
 
-protocol IntegerPropertyProtocol: FixedWidthInteger, _BuiltInBridgeType {
+protocol IntegerPropertyProtocol: _BuiltInBridgeType, FixedWidthInteger {
     init?(_ text: String, radix: Int)
-    init(_ number: NSNumber)
+    init(truncating number: NSNumber)
 }
 
 extension IntegerPropertyProtocol {
@@ -25,7 +25,7 @@ extension IntegerPropertyProtocol {
         case let str as String:
             return Self(str, radix: 10)
         case let num as NSNumber:
-            return Self(num)
+            return Self(truncating: num)
         default:
             return nil
         }
@@ -63,10 +63,10 @@ extension Bool: _BuiltInBridgeType {
     }
 }
 
-// Support float type
+// MARK: - Support float type
 
 protocol FloatPropertyProtocol: _BuiltInBridgeType, LosslessStringConvertible {
-    init(_ number: NSNumber)
+    init(truncating number: NSNumber)
 }
 
 extension FloatPropertyProtocol {
@@ -75,8 +75,18 @@ extension FloatPropertyProtocol {
         case let str as String:
             return Self(str)
         case let num as NSNumber:
-            return Self(num)
+            return Self(truncating: num)
         default:
+            return nil
+        }
+    }
+}
+
+extension CGFloat: LosslessStringConvertible {
+    public init?(_ description: String) {
+        if let value = Double(description) {
+            self = CGFloat(value)
+        } else {
             return nil
         }
     }
@@ -84,6 +94,7 @@ extension FloatPropertyProtocol {
 
 extension Float: FloatPropertyProtocol {}
 extension Double: FloatPropertyProtocol {}
+extension CGFloat: FloatPropertyProtocol {}
 
 private let formatter: NumberFormatter = {
     let formatter = NumberFormatter()

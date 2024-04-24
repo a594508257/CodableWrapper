@@ -41,6 +41,10 @@ struct ExampleModel: Codable {
     var testFloats: [Float]?
 
     static var empty: ExampleModel = .init()
+
+    var aaa: Double = 20
+
+    var bbb: CGFloat = 200
 }
 
 @Codable
@@ -103,14 +107,16 @@ class ExampleTest: XCTestCase {
     }
 
     func testBasicUsage() throws {
-        let json = #"{"stringVal": "pan", "intVal": "233", "bool": "1", "animal": "cat"}"#
-        let model = try JSONDecoder().decode(ExampleModel.self, from: json.data(using: .utf8)!)
+        let json = #"{"stringVal": "pan", "intVal": "233", "bool": "1", "animal": "cat", "aaa": "1.001", "bbb": "1.011"}"#
+        let model = try MonoJSONDecoder().decode(ExampleModel.self, from: json.data(using: .utf8)!)
         XCTAssertEqual(model.intVal, 233)
         XCTAssertEqual(model.stringVal, "pan")
         XCTAssertEqual(model.unImpl, nil)
         XCTAssertEqual(model.array, [1.998, 2.998, 3.998])
         XCTAssertEqual(model.bool, true)
         XCTAssertEqual(model.animal, .cat)
+        XCTAssertEqual(model.aaa, 1.001)
+        XCTAssertEqual(model.bbb, 1.011)
     }
 
     func testCodingKeyEncode() throws {
